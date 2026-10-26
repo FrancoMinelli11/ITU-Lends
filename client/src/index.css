@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   Estilos base y utilidades compartidas
+   ============================================================================= */
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-slate-100 text-slate-800 antialiased;
+  }
+
+  /* Anillo de foco accesible y consistente en toda la app. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-marca-500 ring-offset-2 ring-offset-white;
+  }
+
+  /* Los navegadores ignoran el hide de spinners en inputs numéricos; se limpia
+     el campo del PIN para que no muestre flechas. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* Contenedor estándar de tarjeta/sección. */
+  .tarjeta {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  /* Etiqueta de formulario. */
+  .etiqueta {
+    @apply mb-1.5 block text-sm font-medium text-slate-700;
+  }
+
+  /* Texto de ayuda debajo de un campo. */
+  .texto-ayuda {
+    @apply mt-1 text-xs text-slate-500;
+  }
+
+  /* Mensaje de error de un campo. */
+  .texto-error {
+    @apply mt-1 text-xs font-medium text-rose-600;
+  }
+}
+
+@layer utilities {
+  /* Scroll fino para listas largas del panel de secretaría. */
+  .scroll-fino {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(203 213 225) transparent;
+  }
+
+  .scroll-fino::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scroll-fino::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+
+  /* Los contadores regresivos usan cifras de ancho fijo para no "bailar". */
+  .cifras-fijas {
+    font-variant-numeric: tabular-nums;
+  }
+}

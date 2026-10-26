@@ -1,0 +1,208 @@
+// =============================================================================
+//  Esquema de base de datos - Sistema de Préstamo de Computadoras (Sprints 1 al 3)
+//  Motor: PostgreSQL | ORM: Prisma
+//
+//  Convenciones:
+//   - Los nombres de modelos se mapean a tablas en snake_case plural (@@map).
+//   - Los campos de negocio conservan el nombre EXACTO definido en los
+//     requerimientos funcionales (dni, codigo_inventario, fecha_hora_inicio, ...).
+//   - Todos los identificadores son UUID v4 para evitar enumeración secuencial.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+//  Enums del dominio
+// -----------------------------------------------------------------------------
+
+/// Roles del sistema. El alcance actual define alumnos y personal de secretaría.
+enum Rol {
+  ALUMNO
+  SECRETARIO
+}
+
+/// Estado administrativo del usuario (un alumno SUSPENDIDO no puede reservar).
+enum EstadoUsuario {
+  ACTIVO
+  SUSPENDIDO
+}
+
+/// Estados posibles de una computadora dentro del circuito de préstamo.
+enum EstadoComputadora {
+  DISPONIBLE
+  RESERVADA
+  EN_USO
+  MANTENIMIENTO
+}
+
+/// Ciclo de vida de un préstamo/reserva.
+/// PENDIENTE_RETIRO   -> el alumno reservó y debe presentar el PIN en secretaría.
+/// ACTIVO             -> la secretaría validó el PIN y el equipo está en uso.
+/// FINALIZADO         -> el equipo fue devuelto (por el alumno o en el mostrador).
+/// CANCELADO          -> cancelado por el alumno o por secretaría antes del retiro.
+/// CANCELADO_NO_SHOW  -> política de no-show: pasaron los TOLERANCIA_CHECK_IN_MINUTOS
+///                       sin presentarse a retirar (job automático, Sprint 3).
+enum EstadoPrestamo {
+  PENDIENTE_RETIRO
+  ACTIVO
+  FINALIZADO
+  CANCELADO
+  CANCELADO_NO_SHOW
+}
+
+/// Estados del workflow de un reporte de falla (se mantiene el historial de
+/// atención; `resuelto` es la bandera simple que consume la UI, Sprint 3).
+enum EstadoReporte {
+  PENDIENTE
+  EN_REVISION
+  RESUELTO
+}
+
+/// Severidad de una falla reportada. GRAVE y CRITICA derivan la computadora
+/// a MANTENIMIENTO automáticamente al registrar la devolución (Sprint 3).
+enum SeveridadFalla {
+  LEVE
+  GRAVE
+  CRITICA
+}
+
+// -----------------------------------------------------------------------------
+//  Modelos
+// -----------------------------------------------------------------------------
+
+model Usuario {
+  id        String        @id @default(uuid())
+  /// Documento Nacional de Identidad: identificador natural del alumno.
+  dni       String        @unique
+  nombre    String
+  apellido  String
+  email     String        @unique
+  /// Hash bcrypt. Nunca se retorna por la API (ver serializarUsuario).
+  password  String        @db.VarChar(120)
+  rol       Rol           @default(ALUMNO)
+  estado    EstadoUsuario @default(ACTIVO)
+
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+
+  /// Relaciones
+  prestamos Prestamo[]
+  reportes  ReporteFalla[]
+
+  /// Índices de apoyo para búsquedas frecuentes del panel de secretaría
+  @@index([rol, estado])
+  @@index([apellido, nombre])
+  @@map("usuarios")
+}
+
+model Computadora {
+  id      String  @id @default(uuid())
+  /// Código de inventario físico de la máquina (etiqueta pegada al gabinete).
+  codigo_inventario String @unique @db.VarChar(40)
+  modelo            String @db.VarChar(120)
+  especificaciones  String? @db.Text
+
+  estado EstadoComputadora @default(DISPONIBLE)
+
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+
+  /// Relaciones
+  prestamos Prestamo[]
+  reportes  ReporteFalla[]
+
+  /// El catálogo filtra constantemente por estado -> índice dedicado.
+  @@index([estado])
+  @@map("computadoras")
+}
+
+model Prestamo {
+  id String @id @default(uuid())
+
+  usuario_id     String
+  computadora_id String
+
+  /// Para reservas inmediatas = momento de la reserva.
+  /// Para reservas programadas = hora de retiro acordada (máximo +60 min).
+  fecha_hora_inicio       DateTime
+  /// Momento estimado de devolución (inicio + DURACION_PRESTAMO_MINUTOS).
+  fecha_hora_fin_estimada DateTime
+  /// Se completa recién cuando la secretaría cierra el préstamo.
+  fecha_hora_fin_real     DateTime?
+
+  /// Observaciones del alumno/secretaría al entregar el equipo (Sprint 3).
+  observaciones_devolucion String? @db.Text
+
+  /// Bandera de idempotencia de la "alerta de 15 minutos": se pone en true al
+  /// emitir el evento `prestamo_por_vencer` y vuelve a false si se extiende el
+  /// préstamo, de modo que cada vencimiento avisa exactamente una vez.
+  alerta_vencimiento_enviada Boolean @default(false)
+
+  /// PIN numérico de 4 dígitos que el alumno presenta en secretaría.
+  /// No es @unique global (el espacio de 4 dígitos es pequeño): la unicidad se
+  /// garantiza por transacción SOLO entre préstamos vigentes (ver prestamo.service).
+  token_validacion String @db.VarChar(4)
+
+  estado EstadoPrestamo @default(PENDIENTE_RETIRO)
+
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+
+  /// Relaciones con integridad referencial explícita.
+  usuario     Usuario     @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  computadora Computadora @relation(fields: [computadora_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reportes    ReporteFalla[]
+
+  /// Índices que soportan las consultas calientes del sistema:
+  ///  - "¿este alumno ya tiene un préstamo vigente?"   -> [usuario_id, estado]
+  ///  - "¿quién ocupa esta máquina ahora?"             -> [computadora_id, estado]
+  ///  - "buscar reserva por PIN (check-in)"            -> [token_validacion, estado]
+  ///  - "préstamos activos ordenados por vencimiento"  -> [estado, fecha_hora_fin_estimada]
+  @@index([usuario_id, estado])
+  @@index([computadora_id, estado])
+  @@index([token_validacion, estado])
+  @@index([estado, fecha_hora_fin_estimada])
+  @@map("prestamos")
+}
+
+/// Reporte de falla técnica (Sprint 3 - US-08).
+/// Relación bidireccional completa: Prestamo.reportes[], Computadora.reportes[]
+/// y desde acá se llega a ambas. `prestamo_id` es opcional porque también se
+/// puede reportar una máquina ya en mantenimiento sin préstamo asociado (seed).
+/// Nota: `created_at` del requerimiento se modela como `creado_en` para respetar
+/// la convención de nombres del resto del esquema.
+model ReporteFalla {
+  id String @id @default(uuid())
+
+  usuario_id     String
+  computadora_id String
+  /// Préstamo durante el cual se detectó la falla (opcional: puede reportarse
+  /// una máquina en mantenimiento sin préstamo asociado).
+  prestamo_id    String?
+
+  descripcion String @db.Text
+  /// LEVE | GRAVE | CRITICA -> determina si la PC pasa a MANTENIMIENTO.
+  severidad   SeveridadFalla @default(LEVE)
+  /// true cuando la falla fue atendida (se cierra al reintegrar el equipo).
+  resuelto    Boolean        @default(false)
+  estado      EstadoReporte  @default(PENDIENTE)
+
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+
+  usuario     Usuario     @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+  computadora Computadora @relation(fields: [computadora_id], references: [id], onDelete: Restrict)
+  prestamo    Prestamo?   @relation(fields: [prestamo_id], references: [id], onDelete: SetNull)
+
+  @@index([computadora_id, estado])
+  @@index([estado, creado_en])
+  @@index([prestamo_id])
+  @@map("reportes_falla")
+}

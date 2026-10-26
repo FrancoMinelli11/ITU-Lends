@@ -1,0 +1,34 @@
+# Dependencias
+node_modules/
+.pnp/
+.pnp.js
+
+# Variables de entorno (nunca subir secretos reales)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Builds y artefactos
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Prisma
+server/prisma/migrations/dev.db*
+server/prisma/*.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

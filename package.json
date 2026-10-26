@@ -1,0 +1,24 @@
+{
+  "name": "proyecto-itu-prestamos",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sistema de prestamo de computadoras para la facultad - Sprints 1 al 3 (monorepo client/server)",
+  "scripts": {
+    "instalar": "npm install --prefix server && npm install --prefix client && npm install",
+    "db:migrate": "npm run db:migrate --prefix server",
+    "db:seed": "npm run db:seed --prefix server",
+    "db:studio": "npm run db:studio --prefix server",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "dev": "concurrently -n server,client -c blue,magenta \"npm run dev:server\" \"npm run dev:client\"",
+    "test:humo": "npm run test:humo --prefix server",
+    "test:e2e": "npm run test:e2e --prefix server",
+    "build": "npm run build --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
